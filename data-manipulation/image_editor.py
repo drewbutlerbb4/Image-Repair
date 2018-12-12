@@ -5,6 +5,7 @@ In the following code Image refers to PIL.Image
 from PIL import Image, ImageDraw
 import os
 import random
+import math
 
 
 def get_image(image_path):
@@ -43,7 +44,6 @@ def list_to_image(pixel_list, mode, size):
     return im
 
 
-# TODO: Implement Fade
 def crease_image(image, crease_size, use_fade):
     """
     Adds a crease to the given image
@@ -54,6 +54,10 @@ def crease_image(image, crease_size, use_fade):
     :param use_fade:    Whether or not to fade out the crease
     :return:            The corresponding image with a crease
     """
+
+    if use_fade:
+        orig_image = image
+        image = Image.new(image.mode, image.size, '#000000')
 
     # Decides the two points on the edge of the image that will be the endpoints to the crease
 
@@ -102,28 +106,133 @@ def crease_image(image, crease_size, use_fade):
     line_y2 += dy
 
     # Creates a copy image of the original and then overlays a line on it
-    return_image = Image.new(image.mode, image.size)
-    return_image.putdata(image_to_list(image))
-    draw = ImageDraw.Draw(return_image)
-    draw.line((line_x,line_y, line_x2,line_y2), width=crease_size)
+    fade_image = Image.new(image.mode, image.size)
+    fade_image.putdata(image_to_list(image))
+    draw = ImageDraw.Draw(fade_image)
 
+    return_image = Image.new(image.mode, image.size)
+
+    if not use_fade:
+        return_image.putdata(image_to_list(image))
+        draw = ImageDraw.Draw(return_image)
+        draw.line((line_x, line_y, line_x2, line_y2), fill='#ff0000', width=crease_size)
+        return return_image
+
+    if crease_size <= 2:
+        draw.line((line_x, line_y, line_x2, line_y2), fill='#ff0000', width=crease_size)
+    elif crease_size <= 5:
+        draw.line((line_x, line_y, line_x2, line_y2), fill='#ff0001', width=crease_size)
+        draw.line((line_x, line_y, line_x2, line_y2), fill='#ff0000', width=2)
+    else:
+        for x in range(0, crease_size - 2):
+            fill_value = str((crease_size - 3) - x)
+            if len(fill_value) > 7:
+                raise IndexError("Too large of a crease size")
+            while len(fill_value) < 4:
+                fill_value = "0" + fill_value
+            fill_color = "#ff" + fill_value
+            draw.line((line_x, line_y, line_x2, line_y2), fill=fill_color, width=((crease_size - 3) - x))
+
+    fade_data = image_to_list(fade_image)
+    orig_data = image_to_list(orig_image)
+
+    num_fades = crease_size - 2
+    for pixel_iter in range(0, len(fade_data)):
+        pixel_color = fade_data[pixel_iter]
+        orig_pixel = orig_data[pixel_iter]
+        if not pixel_color == (0,0,0):
+            hex11 = math.floor((pixel_color[1] + 1) / 16)
+            hex12 = (pixel_color[1] - (hex11 * 16))
+            hex21 = math.floor((pixel_color[2] + 1) / 16)
+            hex22 = (pixel_color[2] - (hex21 * 16))
+            color_value = int(str(hex11) + str(hex12) + str(hex21) + str(hex22))
+            frac = color_value / num_fades
+            r_val = int(255 - ((255 - orig_pixel[0]) * frac))
+            g_val = int(255 - ((255 - orig_pixel[1]) * frac))
+            b_val = int(255 - ((255 - orig_pixel[2]) * frac))
+            orig_data[pixel_iter] = (r_val, g_val, b_val)
+
+    return_image.putdata(orig_data)
     return return_image
 
 
-# TODO: Implement fade
 def blotch_image(image, blotch_size, use_fade):
+    """
+    Creates a blotch on the given image
 
-    return_image = Image.new(image.mode, image.size)
-    return_image.putdata(image_to_list(image))
-    draw = ImageDraw.Draw(return_image)
-    print(((2 * blotch_size) + image.size[0]) - blotch_size)
-    print(((2 * blotch_size) + image.size[1]) - blotch_size)
+    :param image:       The original image to be damaged
+    :param blotch_size: The size of the blotch (in rectangular bounds)
+    :param use_fade:    Whether or not the blotch should fade
+    :return:            The image with an added blotch
+    """
+
+    if use_fade:
+        orig_image = image
+        image = Image.new(image.mode, image.size, '#000000')
+
     x1 = random.randint(0, blotch_size + image.size[0]) - blotch_size
     y1 = random.randint(0, blotch_size + image.size[1]) - blotch_size
     x2 = x1 + blotch_size
     y2 = y1 + blotch_size
-    print(x1,y1,x2,y2)
-    draw.ellipse([x1,y1, x2,y2], fill='white')
+    print(x1, y1, x2, y2)
+
+    if (not use_fade) | (blotch_size <= 5):
+        return_image = Image.new(image.mode, image.size)
+        return_image.putdata(image_to_list(image))
+        draw = ImageDraw.Draw(return_image)
+        draw.ellipse([x1, y1, x2, y2], fill='white')
+        return return_image
+
+    draw = ImageDraw.Draw(image)
+    if blotch_size % 2 == 0:
+        jump = int((x2 - x1)/2)
+        cb = ((jump + x1, jump + y1), (jump + x1 + 1, jump + y1 + 1))
+
+        for x in range(0, int(blotch_size/2) - 1):
+            fill_value = str(int((blotch_size/2)) - 2 - x)
+            if len(fill_value) > 7:
+                raise IndexError("Too large of a crease size")
+            while len(fill_value) < 4:
+                fill_value = "0" + fill_value
+            fill_color = "#ff" + fill_value
+
+            b = int(blotch_size/2) - x
+            draw.ellipse([cb[0][0]-b, cb[0][1]-b, cb[1][0]+b, cb[1][1]+b], fill=fill_color)
+    else:
+        cb = (math.floor((x2 - x1)/2) + x1, math.floor((y2 - y1)/2) + y1)
+
+        for x in range(0, int((blotch_size - 1)/2) - 1):
+            fill_value = str(int((blotch_size - 1)/2 - 2 - x))
+            if len(fill_value) > 7:
+                raise IndexError("Too large of a crease size")
+            while len(fill_value) < 4:
+                fill_value = "0" + fill_value
+            fill_color = "#ff" + fill_value
+
+            b = int((blotch_size-1)/2) - x
+            draw.ellipse([cb[0]-b,cb[1]-b, cb[0]+b,cb[1]+b], fill=fill_color)
+
+    fade_data = image_to_list(image)
+    orig_data = image_to_list(orig_image)
+
+    num_fades = (blotch_size / 2) - 1 if blotch_size % 2 == 0 else ((blotch_size - 1) / 2) - 1
+    for pixel_iter in range(0, len(fade_data)):
+        pixel_color = fade_data[pixel_iter]
+        orig_pixel = orig_data[pixel_iter]
+        if not pixel_color == (0, 0, 0):
+            hex11 = math.floor((pixel_color[1] + 1) / 16)
+            hex12 = (pixel_color[1] - (hex11 * 16))
+            hex21 = math.floor((pixel_color[2] + 1) / 16)
+            hex22 = (pixel_color[2] - (hex21 * 16))
+            color_value = int(str(hex11) + str(hex12) + str(hex21) + str(hex22))
+            frac = color_value / num_fades
+            r_val = int(255 - ((255 - orig_pixel[0]) * frac))
+            g_val = int(255 - ((255 - orig_pixel[1]) * frac))
+            b_val = int(255 - ((255 - orig_pixel[2]) * frac))
+            orig_data[pixel_iter] = (r_val, g_val, b_val)
+
+    return_image = Image.new(image.mode, image.size)
+    return_image.putdata(orig_data)
     return return_image
 
 
@@ -158,18 +267,12 @@ def sample_damaging(image):
     """
     return crease_image(blotch_image(image, 100, False), 10, False)
 
-"""
-# Helpful Code
-im = get_image("../dataset/toy-set/soldiers.jpg")
-im2 = blotch_image(im,100,False)
-im2.show()
 
-
+# Test Code for damaging an image
 im = get_image("../dataset/toy-set/soldiers.jpg")
-print(im.size)
-draw = ImageDraw.Draw(im)
-draw.line((0,0, 1023,500),width=6)
-list2 = image_to_list(im)
-im2 = list_to_image(list2, im.mode, im.size)
-im2.show()
-"""
+im.show()
+im = blotch_image(im, 100, True)
+im = blotch_image(im, 100, True)
+im = blotch_image(im, 100, True)
+im = crease_image(im, 30, True)
+im.show()
