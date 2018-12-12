@@ -115,7 +115,7 @@ def crease_image(image, crease_size, use_fade):
     if not use_fade:
         return_image.putdata(image_to_list(image))
         draw = ImageDraw.Draw(return_image)
-        draw.line((line_x, line_y, line_x2, line_y2), fill='#ff0000', width=crease_size)
+        draw.line((line_x, line_y, line_x2, line_y2), fill='#ffffff', width=crease_size)
         return return_image
 
     if crease_size <= 2:
@@ -174,7 +174,6 @@ def blotch_image(image, blotch_size, use_fade):
     y1 = random.randint(0, blotch_size + image.size[1]) - blotch_size
     x2 = x1 + blotch_size
     y2 = y1 + blotch_size
-    print(x1, y1, x2, y2)
 
     if (not use_fade) | (blotch_size <= 5):
         return_image = Image.new(image.mode, image.size)
@@ -236,7 +235,6 @@ def blotch_image(image, blotch_size, use_fade):
     return return_image
 
 
-# Untested
 def preprocess_directory(data_path, label_path, damage_fn):
     """
     Preprocesses the data in data_path using the method damage_fn
@@ -265,8 +263,11 @@ def sample_damaging(image):
     :param image:   The image to be damaged
     :return:        The damaged image
     """
-    return crease_image(blotch_image(image, 100, False), 10, False)
+    return crease_image(blotch_image(image, 100, True), 10, False)
 
+
+# Sample Pre-processing
+preprocess_directory("../dataset/toy-set", "../dataset/toy-set-labels",sample_damaging)
 
 # Test Code for damaging an image
 im = get_image("../dataset/toy-set/soldiers.jpg")
