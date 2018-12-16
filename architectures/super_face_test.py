@@ -23,6 +23,9 @@ import torchvision.models as models
 from tempfile import TemporaryFile
 import csv
 import math
+import tensorflow as tf
+import sys
+import image_editor 
 ngf=32
 
 list_attr=['5_o_Clock_Shadow','Arched_Eyebrows', 'Bags_Under_Eyes', 'Big_Lips', 'Big_Nose','Bushy_Eyebrows', 
@@ -32,10 +35,10 @@ list_attr=['5_o_Clock_Shadow','Arched_Eyebrows', 'Bags_Under_Eyes', 'Big_Lips', 
 nAttr=18
 imageSize_LR=16
 imageSize_HR=128
-batch_num=32
+batch_num=16
 
 def get_loader(image_dir, image_size, 
-               batch_size, dataset='RaFD', mode='train', num_workers=0):
+               batch_size, mode='train', num_workers=0):
     """Build and return a data loader."""
     transform = []
     if mode == 'train':
@@ -46,11 +49,7 @@ def get_loader(image_dir, image_size,
     #transform.append(T.Normalize(mean=(0.5, 0.5, 0.5), std=(0.5, 0.5, 0.5)))
     transform = T.Compose(transform)
 
-
-    if dataset == 'CelebA':
-        dataset = CelebA(image_dir, attr_path, selected_attrs, transform, mode)
-    elif dataset == 'RaFD':
-        dataset = ImageFolder(image_dir, transform)
+    dataset = ImageFolder(image_dir, transform)
 
     data_loader = data.DataLoader(dataset=dataset,
                                   batch_size=batch_size,
@@ -61,21 +60,21 @@ def get_loader(image_dir, image_size,
 
 #Path to ./DataFolder/Fams/
 #Loads real images
-HR_loader = get_loader('/scratch0/nbalacha/img_align_celeba_selected/img_align_celeba/',image_size=((224,224)),batch_size=batch_num,dataset='RaFD',mode='train',num_workers=0)
-
+HR_loader = get_loader('C:/Users/Yami/Desktop/CMSC498V/Image-Repair/architectures/DataFolder/',image_size=((224,224)),batch_size=batch_num,mode='train',num_workers=0)
+LR_loader = get_loader('C:/Users/Yami/Desktop/CMSC498V/Image-Repair/architectures/DataFolder/',image_size=((224,224)),batch_size=batch_num,mode='train',num_workers=0)
 class D(nn.Module):
 
     def __init__(self):
         super(D, self).__init__()
         ##(W-F+2P)/S  + 1    Output size of conv layer
         #W = width, F = filter size, S = stride, P = padding
-        self.conv1 = nn.Conv2d(3, 32, stride=5, padding=2, bias = False)
+        self.conv1 = nn.Conv2d(3, 32, 5, padding=0, bias = False)
         self.relu1 = nn.ReLU()
-        self.conv2 = nn.Conv2d(32, 64, stride=5, padding=2, bias = False)
+        self.conv2 = nn.Conv2d(32, 64, 5, padding=0, bias = False)
         self.relu2 = nn.ReLU()
-        self.conv3 = nn.Conv2d(64, 128, stride=4, padding=2, bias = False)
+        self.conv3 = nn.Conv2d(64, 128, 4, padding=0, bias = False)
         self.relu3 = nn.ReLU()
-        self.conv4 = nn.Conv2d(128, 256, stride=4, padding=1, bias = False)
+        self.conv4 = nn.Conv2d(128, 256, 4, padding=0, bias = False)
         self.relu4 = nn.ReLU()
         self.fc1   = nn.Linear(11*11*8*32,1024)
         self.relu5 = nn.ReLU()
@@ -153,8 +152,7 @@ class G(nn.Module):
         d2 = self.batch_norm9(self.deconv1(d2))
         d2 = self.batch_norm10(self.deconv2(d2))
         d2 = self.batch_norm11(self.deconv3(d2))
-        d2 = self.deconv4(d2)		
-        
+        d2 = self.deconv4(d2)
         return d2
 		
 
@@ -179,8 +177,8 @@ if torch.cuda.device_count() == 1:
     netG = nn.DataParallel(netG,device_ids=[0])
 
 #Loading weights
-# netD.load_state_dict(torch.load('/scratch0/nbalacha/models/face_PL_D.pth')) 
-# netG.load_state_dict(torch.load('/scratch0/nbalacha/models/face_PL_G.pth'))
+#netD.load_state_dict(torch.load('C:/Users/Yami/Desktop/CMSC498V/Image-Repair/models/face_PL_D.pth')) 
+#netG.load_state_dict(torch.load('C:/Users/Yami/Desktop/CMSC498V/Image-Repair/models/face_PL_G.pth'))
 
 netG = netG.to(device)
 netD = netD.to(device)
@@ -188,8 +186,8 @@ netD = netD.to(device)
 
 criterion_D = nn.BCELoss() #Binary cross entorpy lost 
 criterion_G = nn.BCELoss() 
-criterion_L = nn.MSELoss()
-
+criterion_LH = nn.L1Loss()
+criterion_LV = nn.L1Loss()
 
 optimizerD = optim.RMSprop(netD.parameters(),lr=0.001,alpha=.9)
 optimizerG = optim.RMSprop(netG.parameters(),lr=0.001,alpha=.9)
@@ -198,23 +196,38 @@ optimizerG = optim.RMSprop(netG.parameters(),lr=0.001,alpha=.9)
 # schedulerD = optim.lr_scheduler.StepLR(optimizerD, step_size=1, gamma=0.95)
 # schedulerG = optim.lr_scheduler.StepLR(optimizerG, step_size=1, gamma=0.95)
 
-scale_HR = T.Compose([T.Normalize(mean = [0.5, 0.5, 0.5],std = [0.5, 0.5, 0.5])])
-
-#Prepocess inputs
-#This just normalize image			
-# scale_LR = T.Compose([T.ToPILImage(),
-#                             T.Resize((16,16),interpolation=0),
-#                             T.ToTensor(),
-#                             T.Normalize(mean = [0.5, 0.5, 0.5],std = [0.5, 0.5, 0.5])
-#                             ])
+                            
+scale_LR = T.Compose([T.ToPILImage(),
+                            T.Resize((224,224),interpolation=0),
+                            T.ToTensor(),
+                            T.Normalize(mean = [0.5, 0.5, 0.5],std = [0.5, 0.5, 0.5])
+                            ])
 #Need a function that takes an image and add noise 
+toImage = T.Compose([T.ToPILImage()])
+toTensor = T.Compose([T.ToTensor()])
 
+class TVLoss(nn.Module):
+    def __init__(self,TVLoss_weight=1):
+        super(TVLoss,self).__init__()
+        self.TVLoss_weight = TVLoss_weight
+
+    def forward(self,x):
+        batch_size = x.size()[0]
+        h_x = x.size()[2]
+        w_x = x.size()[3]
+        count_h = self._tensor_size(x[:,:,1:,:])
+        count_w = self._tensor_size(x[:,:,:,1:])
+        h_tv = torch.pow((x[:,:,1:,:]-x[:,:,:h_x-1,:]),2).sum()
+        w_tv = torch.pow((x[:,:,:,1:]-x[:,:,:,:w_x-1]),2).sum()
+        return self.TVLoss_weight*2*(h_tv/count_h+w_tv/count_w)/batch_size
+
+    def _tensor_size(self,t):
+        return t.size()[1]*t.size()[2]*t.size()[3]
+total_var_loss = TVLoss()
 
 #Training phase
 #Number of epochs 
-for epoch in range(0,25):
-    schedulerD.step()
-    schedulerG.step()
+for epoch in range(0,100000):
     # if(epoch<135):
     #     for g in optimizerD.param_groups:
     #         g['lr'] = 0.001*math.pow(.95,epoch)
@@ -238,15 +251,25 @@ for epoch in range(0,25):
         start=time.time()
        
 
-        real = data_HR
-        
+        real,attr = data_HR
+
         LR_input= torch.FloatTensor(batch_num,3,224,224) #LR is the noise image
-        #Apply noise to image
-        #real is ground truth
-        #LR is noisy image
+        # #Apply noise to image
+        # #real is ground truth
+        # #LR is noisy image
+        mask_input = torch.FloatTensor(batch_num,3,224,224)
+        opposite_mask_input = torch.FloatTensor(batch_num,3,224,224)
         for a in range(0,len(real)):
-            LR_input[a] = scale_LR(real[a]) 
-            real[a] = scale_HR(real[a])
+            w = toImage(real[a]) 
+            w,mask = image_editor.sample_damaging(w)
+            mask_input[a] = toTensor(mask)
+            mask = np.array(mask)
+            opposite_mask = np.where(mask > .5,0,1)
+            opposite_mask = (opposite_mask*255).astype(np.uint8)
+            opposite_mask = Image.fromarray(opposite_mask)
+            opposite_mask_input[a] = toTensor(opposite_mask)
+            LR_input[a] = toTensor(w)
+            #LR_input[a] = scale_LR(real[a]) 
 
         real = real.to(device)
         real = Variable(real)
@@ -255,12 +278,13 @@ for epoch in range(0,25):
         target = Variable(torch.ones(real.size()[0])).to(device)
 
         output = netD(real)
-        errD_real = criterion_D(output, target) #errD is the discrimator loss on idenifying real images
 
+        errD_real = criterion_D(output, target) #errD is the discrimator loss on idenifying real images
         LR_input = LR_input.to(device)
         fake=netG(LR_input)
         target = Variable(torch.zeros(real.size()[0])).to(device)
         output = netD(fake.detach())
+
         errD_fake = criterion_D(output, target) #errD_fake is the discrimator loss on idenifying fake images
         #print(output)
         errD = (errD_real + errD_fake)
@@ -272,15 +296,55 @@ for epoch in range(0,25):
         netG.zero_grad()
         target = Variable(torch.ones(real.size()[0])).to(device)
         output = netD(fake)
+        errG_V =total_var_loss(fake.to(device)) 
 
-        errG_L = criterion_L(fake.to(device),real.to(device))	
+        #turn mask to numpy array
+        #turn fake to numpy array
+        #copy real, and turn to numpy array
+        copy_fake = fake
+        copy_real = real
+        copy_mask = mask_input
+        FV = torch.FloatTensor(batch_num,3,224,224)
+        RV = torch.FloatTensor(batch_num,3,224,224)
 
-			
+        for a in range(0,len(real)):
+
+            current_real = copy_real[a].cpu().detach().numpy()
+            current_fake = copy_fake[a].cpu().detach().numpy()
+            current_mask = copy_mask[a].numpy()
+            FV[a] = torch.from_numpy(np.multiply(current_mask,current_fake))
+            RV[a] = torch.from_numpy(np.multiply(current_mask,current_real))
+            # zz
+            # FV = np.mutiply(mask,copy_fake) #Fake valid
+            # RV = np.mutiply(mask,copy_real) #Real valid
+
+
+        #turn mask to numpy array
+        #turn fake to numpy array
+        #copy real, and turn to numpy array
+        copy_mask = opposite_mask_input
+        FH = torch.FloatTensor(batch_num,3,224,224)
+        RH = torch.FloatTensor(batch_num,3,224,224)
+        for a in range(0,len(real)):
+
+            current_real = copy_real[a].cpu().detach().numpy()
+            current_fake = copy_fake[a].cpu().detach().numpy()
+            oppsite_mask = copy_mask[a].numpy()
+            FH[a] = torch.from_numpy(np.multiply(oppsite_mask,current_fake))
+            RH[a] = torch.from_numpy(np.multiply(oppsite_mask,current_real))
+
+        # FH = np.mutiply(oppsite_mask,copy_fake) #Fake valid
+        # RH = np.mutiply(oppsite_mask,copy_real) #Real valid
+
+        errG_LV = criterion_LV(FV.to(device),RV.to(device)) 
+        errG_LH = criterion_LH(FH.to(device),RH.to(device)) 
+
+		
         if i % 25 ==0:
             #Change the paths
-            vutils.save_image(real, '%s/real_PL.png' % "/scratch0/nbalacha/results", normalize = True)
+            vutils.save_image(real, '%s/real_PL.png' % "C:/Users/Yami/Desktop/CMSC498V/Image-Repair/results/", normalize = False)
             save_fake = netG(LR_input)
-            vutils.save_image(save_fake.data, '%s/fake_PL_epoch_%03d.png' % ("/scratch0/nbalacha/results", epoch), normalize = True)
+            vutils.save_image(save_fake.data, '%s/fake_PL_epoch_%03d.png' % ("C:/Users/Yami/Desktop/CMSC498V/Image-Repair/results/", epoch), normalize = False)
 
         
 
@@ -291,8 +355,9 @@ for epoch in range(0,25):
         errG_G = criterion_G(output, torch.t(target.unsqueeze(0))) #May not need to do transpose
         #output = torch.log(output)
         #output = torch.mean(output)
-        errG = (max(math.pow(.995,epoch)*.01,.005)*errG_G.to(device)) + errG_L.to(device)
 
+        #errG = (max(math.pow(.995,epoch)*.01,.005)*errG_G.to(device)) + errG_L.to(device)
+        errG = (.01*errG_G.to(device)) + 6*errG_LH + errG_LV + .1*errG_V
         errG.backward()
         optimizerG.step()
         end=time.time()
@@ -309,5 +374,5 @@ for epoch in range(0,25):
             g['lr'] = 0.001*math.pow(.95,epoch)
     
     #Change Path			
-    torch.save(netG.state_dict(),'/scratch0/nbalacha/models/face_PL_G.pth')
-    torch.save(netD.state_dict(),'/scratch0/nbalacha/models/face_PL_D.pth')		
+    torch.save(netG.state_dict(),'C:/Users/Yami/Desktop/CMSC498V/Image-Repair/models/face_PL_G.pth')
+    torch.save(netD.state_dict(),'C:/Users/Yami/Desktop/CMSC498V/Image-Repair/models/face_PL_D.pth')		
